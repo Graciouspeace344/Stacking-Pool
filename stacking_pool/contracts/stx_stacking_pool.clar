@@ -115,3 +115,53 @@
 )
 
 
+;; Public functions
+
+;; Initialize a new stacking cycle
+(define-public (initialize-pool (start-block uint) (btc-reward-addr (buff 34)) (min-stx uint))
+  (begin
+    ;; Check authorization and pool status
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (not (var-get pool-active)) ERR-POOL-ACTIVE)
+    
+    ;; Set pool parameters
+    (var-set pool-active true)
+    (var-set cycle-start-block start-block)
+    (var-set cycle-end-block (+ start-block CYCLE-LENGTH))
+    (var-set min-stx-to-stack min-stx)
+    (var-set stacking-unlocked false)
+    (var-set rewards-received u0)
+    
+    (ok true)
+  )
+)
+
+;; Deposit STX to the pool
+(define-public (deposit (amount uint))
+  (begin
+    ;; Validate input
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (>= amount MIN-PARTICIPATION-AMOUNT) ERR-MIN-AMOUNT-REQUIRED)
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    
+    ;; Transfer STX from user to contract
+    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+    
+    ;; Update user deposit
+    (let (
+      (current-deposit (get-user-deposit tx-sender))
+      (new-deposit-amount (+ current-deposit amount))
+    )
+      (map-set user-deposits tx-sender new-deposit-amount)
+      
+      ;; Update user shares proportionally
+      (map-set user-shares tx-sender new-deposit-amount)
+      
+      ;; Update total stacked
+      (var-set total-stacked (+ (var-get total-stacked) amount))
+      
+      (ok new-deposit-amount)
+    )
+  )
+)
+
