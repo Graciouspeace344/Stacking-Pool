@@ -258,3 +258,27 @@
     )
   )
 )
+
+
+;; Withdraw deposit after stacking is unlocked
+(define-public (withdraw)
+  (let (
+    (user-deposit (get-user-deposit tx-sender))
+  )
+    ;; Validate
+    (asserts! (var-get stacking-unlocked) ERR-STILL-LOCKED)
+    (asserts! (> user-deposit u0) ERR-NO-FUNDS-TO-WITHDRAW)
+    
+    ;; Reset user deposit
+    (map-set user-deposits tx-sender u0)
+    (map-set user-shares tx-sender u0)
+    
+    ;; Transfer STX back to user
+    (as-contract
+      (match (stx-transfer? user-deposit tx-sender tx-sender)
+        success (ok user-deposit)
+        error ERR-TRANSFER-FAILED
+      )
+    )
+  )
+)
