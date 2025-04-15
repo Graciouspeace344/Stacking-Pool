@@ -282,3 +282,64 @@
     )
   )
 )
+
+
+
+;; Withdraw collected fees (owner only)
+(define-public (withdraw-fees)
+  (begin
+    ;; Check authorization
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    
+    (let (
+      (fee-amount (var-get fees-collected))
+    )
+      ;; Validate
+      (asserts! (> fee-amount u0) ERR-NO-FUNDS-TO-WITHDRAW)
+      
+      ;; Reset fees collected
+      (var-set fees-collected u0)
+      
+      ;; Transfer fees to contract owner
+      (as-contract
+        (match (stx-transfer? fee-amount tx-sender CONTRACT-OWNER)
+          success (ok fee-amount)
+          error ERR-TRANSFER-FAILED
+        )
+      )
+    )
+  )
+)
+
+;; End the current stacking cycle
+(define-public (end-cycle)
+  (begin
+    ;; Check authorization and status
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (var-get stacking-unlocked) ERR-STILL-LOCKED)
+    
+    ;; Reset pool
+    (var-set pool-active false)
+    (var-set total-stacked u0)
+    (var-set cycle-start-block u0)
+    (var-set cycle-end-block u0)
+    (var-set stacking-unlocked false)
+    
+    (ok true)
+  )
+)
+
+;; Emergency shutdown (in case of issues)
+(define-public (emergency-shutdown)
+  (begin
+    ;; Check authorization
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    
+    ;; Force unlock and reset
+    (var-set pool-active false)
+    (var-set stacking-unlocked true)
+    
+    (ok true)
+  )
+)
