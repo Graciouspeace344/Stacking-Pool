@@ -165,3 +165,61 @@
   )
 )
 
+;; Start stacking
+(define-public (start-stacking (pox-addr (tuple (version (buff 1)) (hashbytes (buff 20)))))
+  (begin
+    ;; Check authorization and pool status
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (>= (var-get total-stacked) (var-get min-stx-to-stack)) ERR-MIN-AMOUNT-REQUIRED)
+    
+    ;; Call the PoX contract to stack
+    (let (
+      (total-to-stack (var-get total-stacked))
+      (start-burn-ht (var-get cycle-start-block))
+      (lock-period u1) ;; Locks for 1 cycle
+    )
+      ;; Stack STX using contract as the stacker and handle any errors
+      (as-contract
+        (match (contract-call? 'SP000000000000000000002Q6VF78.pox stack-stx total-to-stack pox-addr start-burn-ht lock-period)
+          success (ok true)
+          error ERR-STACKING-FAILED
+        )
+      )
+    )
+  )
+)
+
+;; Unlock stacking when cycle ends
+(define-public (unlock-stacking)
+  (begin
+    ;; Check authorization and status
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (>= block-height (var-get cycle-end-block)) ERR-STILL-LOCKED)
+    (asserts! (not (var-get stacking-unlocked)) ERR-POOL-INACTIVE)
+    
+    ;; Set stacking to unlocked
+    (var-set stacking-unlocked true)
+    
+    (ok true)
+  )
+)
+
+;; Deposit BTC rewards (simulated by depositing STX)
+(define-public (deposit-rewards (amount uint))
+  (begin
+    ;; Check authorization
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    
+    ;; Transfer STX from operator to contract (simulating BTC rewards)
+    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+    
+    ;; Update rewards received
+    (var-set rewards-received (+ (var-get rewards-received) amount))
+    
+    (ok amount)
+  )
+)
