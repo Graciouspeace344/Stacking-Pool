@@ -66,4 +66,36 @@
   }
 )
 
+;; Calculate user's share percentage (returns basis points: 1/100 of 1%)
+(define-read-only (get-user-share-percentage (user principal))
+  (let (
+    (user-deposit (get-user-deposit user))
+    (total-pool (var-get total-stacked))
+  )
+    (if (or (is-eq user-deposit u0) (is-eq total-pool u0))
+      u0
+      (/ (* user-deposit u10000) total-pool)
+    )
+  )
+)
+
+;; Calculate user's pending rewards
+(define-read-only (get-user-pending-rewards (user principal))
+  (let (
+    (share-percentage (get-user-share-percentage user))
+    (total-rewards (var-get rewards-received))
+    (fee-percentage PLATFORM-FEE-PERCENT)
+  )
+    (if (is-eq share-percentage u0)
+      u0
+      (let (
+        (user-portion (/ (* total-rewards share-percentage) u10000))
+        (fee-amount (/ (* user-portion fee-percentage) u100))
+      )
+        (- user-portion fee-amount)
+      )
+    )
+  )
+)
+
 
