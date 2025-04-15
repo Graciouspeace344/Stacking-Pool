@@ -99,3 +99,19 @@
 )
 
 
+;; Check if user has claimed rewards for the current cycle
+(define-read-only (has-claimed-rewards (user principal))
+  (default-to false (map-get? reward-claimed { user: user, cycle: (var-get cycle-start-block) }))
+)
+
+;; Check if stacking is currently locked
+(define-read-only (is-stacking-locked)
+  (not (var-get stacking-unlocked))
+)
+
+;; Get current block height
+(define-read-only (get-current-block)
+  block-height
+)
+
+
