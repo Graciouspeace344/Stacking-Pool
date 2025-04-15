@@ -43,3 +43,27 @@
 (define-map last-user-rewards principal uint)
 (define-map reward-claimed { user: principal, cycle: uint } bool)
 
+
+;; Get user deposit amount
+(define-read-only (get-user-deposit (user principal))
+  (default-to u0 (map-get? user-deposits user))
+)
+
+;; Get user shares
+(define-read-only (get-user-shares (user principal))
+  (default-to u0 (map-get? user-shares user))
+)
+
+;; Get pool status
+(define-read-only (get-pool-status)
+  {
+    active: (var-get pool-active),
+    total-stacked: (var-get total-stacked),
+    cycle-start-block: (var-get cycle-start-block),
+    cycle-end-block: (var-get cycle-end-block),
+    stacking-unlocked: (var-get stacking-unlocked),
+    rewards-received: (var-get rewards-received)
+  }
+)
+
+
