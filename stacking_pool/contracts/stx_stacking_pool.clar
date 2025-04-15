@@ -43,3 +43,303 @@
 (define-map last-user-rewards principal uint)
 (define-map reward-claimed { user: principal, cycle: uint } bool)
 
+
+;; Get user deposit amount
+(define-read-only (get-user-deposit (user principal))
+  (default-to u0 (map-get? user-deposits user))
+)
+
+;; Get user shares
+(define-read-only (get-user-shares (user principal))
+  (default-to u0 (map-get? user-shares user))
+)
+
+;; Get pool status
+(define-read-only (get-pool-status)
+  {
+    active: (var-get pool-active),
+    total-stacked: (var-get total-stacked),
+    cycle-start-block: (var-get cycle-start-block),
+    cycle-end-block: (var-get cycle-end-block),
+    stacking-unlocked: (var-get stacking-unlocked),
+    rewards-received: (var-get rewards-received)
+  }
+)
+
+;; Calculate user's share percentage (returns basis points: 1/100 of 1%)
+(define-read-only (get-user-share-percentage (user principal))
+  (let (
+    (user-deposit (get-user-deposit user))
+    (total-pool (var-get total-stacked))
+  )
+    (if (or (is-eq user-deposit u0) (is-eq total-pool u0))
+      u0
+      (/ (* user-deposit u10000) total-pool)
+    )
+  )
+)
+
+;; Calculate user's pending rewards
+(define-read-only (get-user-pending-rewards (user principal))
+  (let (
+    (share-percentage (get-user-share-percentage user))
+    (total-rewards (var-get rewards-received))
+    (fee-percentage PLATFORM-FEE-PERCENT)
+  )
+    (if (is-eq share-percentage u0)
+      u0
+      (let (
+        (user-portion (/ (* total-rewards share-percentage) u10000))
+        (fee-amount (/ (* user-portion fee-percentage) u100))
+      )
+        (- user-portion fee-amount)
+      )
+    )
+  )
+)
+
+
+;; Check if user has claimed rewards for the current cycle
+(define-read-only (has-claimed-rewards (user principal))
+  (default-to false (map-get? reward-claimed { user: user, cycle: (var-get cycle-start-block) }))
+)
+
+;; Check if stacking is currently locked
+(define-read-only (is-stacking-locked)
+  (not (var-get stacking-unlocked))
+)
+
+;; Get current block height
+(define-read-only (get-current-block)
+  block-height
+)
+
+
+;; Public functions
+
+;; Initialize a new stacking cycle
+(define-public (initialize-pool (start-block uint) (btc-reward-addr (buff 34)) (min-stx uint))
+  (begin
+    ;; Check authorization and pool status
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (not (var-get pool-active)) ERR-POOL-ACTIVE)
+    
+    ;; Set pool parameters
+    (var-set pool-active true)
+    (var-set cycle-start-block start-block)
+    (var-set cycle-end-block (+ start-block CYCLE-LENGTH))
+    (var-set min-stx-to-stack min-stx)
+    (var-set stacking-unlocked false)
+    (var-set rewards-received u0)
+    
+    (ok true)
+  )
+)
+
+;; Deposit STX to the pool
+(define-public (deposit (amount uint))
+  (begin
+    ;; Validate input
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (>= amount MIN-PARTICIPATION-AMOUNT) ERR-MIN-AMOUNT-REQUIRED)
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    
+    ;; Transfer STX from user to contract
+    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+    
+    ;; Update user deposit
+    (let (
+      (current-deposit (get-user-deposit tx-sender))
+      (new-deposit-amount (+ current-deposit amount))
+    )
+      (map-set user-deposits tx-sender new-deposit-amount)
+      
+      ;; Update user shares proportionally
+      (map-set user-shares tx-sender new-deposit-amount)
+      
+      ;; Update total stacked
+      (var-set total-stacked (+ (var-get total-stacked) amount))
+      
+      (ok new-deposit-amount)
+    )
+  )
+)
+
+;; Start stacking
+(define-public (start-stacking (pox-addr (tuple (version (buff 1)) (hashbytes (buff 20)))))
+  (begin
+    ;; Check authorization and pool status
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (>= (var-get total-stacked) (var-get min-stx-to-stack)) ERR-MIN-AMOUNT-REQUIRED)
+    
+    ;; Call the PoX contract to stack
+    (let (
+      (total-to-stack (var-get total-stacked))
+      (start-burn-ht (var-get cycle-start-block))
+      (lock-period u1) ;; Locks for 1 cycle
+    )
+      ;; Stack STX using contract as the stacker and handle any errors
+      (as-contract
+        (match (contract-call? 'SP000000000000000000002Q6VF78.pox stack-stx total-to-stack pox-addr start-burn-ht lock-period)
+          success (ok true)
+          error ERR-STACKING-FAILED
+        )
+      )
+    )
+  )
+)
+
+;; Unlock stacking when cycle ends
+(define-public (unlock-stacking)
+  (begin
+    ;; Check authorization and status
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (>= block-height (var-get cycle-end-block)) ERR-STILL-LOCKED)
+    (asserts! (not (var-get stacking-unlocked)) ERR-POOL-INACTIVE)
+    
+    ;; Set stacking to unlocked
+    (var-set stacking-unlocked true)
+    
+    (ok true)
+  )
+)
+
+;; Deposit BTC rewards (simulated by depositing STX)
+(define-public (deposit-rewards (amount uint))
+  (begin
+    ;; Check authorization
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (> amount u0) ERR-INVALID-AMOUNT)
+    
+    ;; Transfer STX from operator to contract (simulating BTC rewards)
+    (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
+    
+    ;; Update rewards received
+    (var-set rewards-received (+ (var-get rewards-received) amount))
+    
+    (ok amount)
+  )
+)
+
+;; Claim rewards for a user
+(define-public (claim-rewards)
+  (let (
+    (user-rewards (get-user-pending-rewards tx-sender))
+    (has-claimed (has-claimed-rewards tx-sender))
+  )
+    ;; Validate
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (> user-rewards u0) ERR-NO-FUNDS-TO-WITHDRAW)
+    (asserts! (not has-claimed) ERR-ALREADY-CLAIMED)
+    
+    ;; Mark rewards as claimed
+    (map-set reward-claimed { user: tx-sender, cycle: (var-get cycle-start-block) } true)
+    
+    ;; Save last claimed rewards
+    (map-set last-user-rewards tx-sender user-rewards)
+    
+    ;; Calculate fee
+    (let (
+      (fee-amount (/ (* user-rewards PLATFORM-FEE-PERCENT) u100))
+    )
+      ;; Update total fees collected
+      (var-set fees-collected (+ (var-get fees-collected) fee-amount))
+      
+      ;; Transfer rewards to user
+      (as-contract
+        (match (stx-transfer? user-rewards tx-sender tx-sender)
+          success (ok user-rewards)
+          error ERR-REWARDS-CLAIM-FAILED
+        )
+      )
+    )
+  )
+)
+
+
+;; Withdraw deposit after stacking is unlocked
+(define-public (withdraw)
+  (let (
+    (user-deposit (get-user-deposit tx-sender))
+  )
+    ;; Validate
+    (asserts! (var-get stacking-unlocked) ERR-STILL-LOCKED)
+    (asserts! (> user-deposit u0) ERR-NO-FUNDS-TO-WITHDRAW)
+    
+    ;; Reset user deposit
+    (map-set user-deposits tx-sender u0)
+    (map-set user-shares tx-sender u0)
+    
+    ;; Transfer STX back to user
+    (as-contract
+      (match (stx-transfer? user-deposit tx-sender tx-sender)
+        success (ok user-deposit)
+        error ERR-TRANSFER-FAILED
+      )
+    )
+  )
+)
+
+
+
+;; Withdraw collected fees (owner only)
+(define-public (withdraw-fees)
+  (begin
+    ;; Check authorization
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    
+    (let (
+      (fee-amount (var-get fees-collected))
+    )
+      ;; Validate
+      (asserts! (> fee-amount u0) ERR-NO-FUNDS-TO-WITHDRAW)
+      
+      ;; Reset fees collected
+      (var-set fees-collected u0)
+      
+      ;; Transfer fees to contract owner
+      (as-contract
+        (match (stx-transfer? fee-amount tx-sender CONTRACT-OWNER)
+          success (ok fee-amount)
+          error ERR-TRANSFER-FAILED
+        )
+      )
+    )
+  )
+)
+
+;; End the current stacking cycle
+(define-public (end-cycle)
+  (begin
+    ;; Check authorization and status
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (var-get stacking-unlocked) ERR-STILL-LOCKED)
+    
+    ;; Reset pool
+    (var-set pool-active false)
+    (var-set total-stacked u0)
+    (var-set cycle-start-block u0)
+    (var-set cycle-end-block u0)
+    (var-set stacking-unlocked false)
+    
+    (ok true)
+  )
+)
+
+;; Emergency shutdown (in case of issues)
+(define-public (emergency-shutdown)
+  (begin
+    ;; Check authorization
+    (asserts! (is-eq tx-sender CONTRACT-OWNER) ERR-NOT-AUTHORIZED)
+    
+    ;; Force unlock and reset
+    (var-set pool-active false)
+    (var-set stacking-unlocked true)
+    
+    (ok true)
+  )
+)
