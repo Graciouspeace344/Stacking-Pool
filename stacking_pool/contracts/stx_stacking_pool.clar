@@ -24,3 +24,22 @@
 (define-constant MIN-PARTICIPATION-AMOUNT u50000000) ;; 50 STX minimum (in microSTX)
 (define-constant PLATFORM-FEE-PERCENT u5) ;; 5% fee on rewards
 (define-constant CYCLE-LENGTH u2100) ;; Length of stacking cycle in blocks (approximately 2 weeks)
+
+
+
+;; Data variables
+(define-data-var pool-active bool false)
+(define-data-var total-stacked uint u0)
+(define-data-var cycle-start-block uint u0)
+(define-data-var cycle-end-block uint u0)
+(define-data-var min-stx-to-stack uint u0) ;; Minimum STX required by protocol
+(define-data-var stacking-unlocked bool false)
+(define-data-var rewards-received uint u0)
+(define-data-var fees-collected uint u0)
+
+;; Maps
+(define-map user-deposits principal uint)
+(define-map user-shares principal uint)
+(define-map last-user-rewards principal uint)
+(define-map reward-claimed { user: principal, cycle: uint } bool)
+
