@@ -223,3 +223,38 @@
     (ok amount)
   )
 )
+
+;; Claim rewards for a user
+(define-public (claim-rewards)
+  (let (
+    (user-rewards (get-user-pending-rewards tx-sender))
+    (has-claimed (has-claimed-rewards tx-sender))
+  )
+    ;; Validate
+    (asserts! (var-get pool-active) ERR-POOL-INACTIVE)
+    (asserts! (> user-rewards u0) ERR-NO-FUNDS-TO-WITHDRAW)
+    (asserts! (not has-claimed) ERR-ALREADY-CLAIMED)
+    
+    ;; Mark rewards as claimed
+    (map-set reward-claimed { user: tx-sender, cycle: (var-get cycle-start-block) } true)
+    
+    ;; Save last claimed rewards
+    (map-set last-user-rewards tx-sender user-rewards)
+    
+    ;; Calculate fee
+    (let (
+      (fee-amount (/ (* user-rewards PLATFORM-FEE-PERCENT) u100))
+    )
+      ;; Update total fees collected
+      (var-set fees-collected (+ (var-get fees-collected) fee-amount))
+      
+      ;; Transfer rewards to user
+      (as-contract
+        (match (stx-transfer? user-rewards tx-sender tx-sender)
+          success (ok user-rewards)
+          error ERR-REWARDS-CLAIM-FAILED
+        )
+      )
+    )
+  )
+)
